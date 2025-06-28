@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
         // SelectedDayDecorator 초기화 및 캘린더에 추가
         selectedDayDecorator = SelectedDayDecorator(selectedCalendarDay)
         binding.calendarView.addDecorator(selectedDayDecorator)
-
+        setupBottomNavigation()
         setupToolbar()
         setupCalendar()
         setupButtons()
@@ -89,23 +89,46 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    private fun setupBottomNavigation() {
+        binding.bottomNavigation.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_home -> {
+                    // 현재 MainActivity가 홈이므로 아무것도 하지 않음 (또는 홈 화면 초기화 로직)
+                    true
+                }
+                R.id.nav_profile -> {
+                    startActivity(Intent(this, ProfileActivity::class.java))
+                    true
+                }
+                R.id.nav_symptoms -> {
+                    startActivity(Intent(this, SymptomsActivity::class.java))
+                    true
+                }
+                R.id.nav_history -> {
+                    startActivity(Intent(this, HistoryActivity::class.java))
+                    true
+                }
+                else -> false
+            }
+        }
+    }
 
     private fun setupButtons() {
-        binding.btnSymptoms.setOnClickListener {
-            val intent = Intent(this, SymptomsActivity::class.java)
-            startActivity(intent)
-        }
+//        binding.btnSymptoms.setOnClickListener {
+//            val intent = Intent(this, SymptomsActivity::class.java)
+//            startActivity(intent)
+//        }
         binding.btnTakePill.setOnClickListener {
             recordBirthControl()
         }
-        binding.btnHistory.setOnClickListener {
-            val intent = Intent(this, HistoryActivity::class.java)
-            startActivity(intent)
-        }
-        binding.btnProfile.setOnClickListener {
-            val intent = Intent(this, ProfileActivity::class.java)
-            startActivity(intent)
-        }
+//        binding.btnHistory.setOnClickListener {
+//            val intent = Intent(this, HistoryActivity::class.java)
+//            startActivity(intent)
+//        }
+//        binding.btnProfile.setOnClickListener {
+//            val intent = Intent(this, ProfileActivity::class.java)
+//            startActivity(intent)
+//        }
 
         binding.btnStartPeriod.setOnClickListener {
             handleButtonStartPeriod()
