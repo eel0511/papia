@@ -86,6 +86,8 @@ class HomeFragment : Fragment() {
                 binding.calendarView.addDecorator(selectedDayDecorator)
                 binding.tvSelectedRecordDate.text =
                     "선택된 날짜: ${dateFormat.format(selectedCalendarDay.date)}"
+
+                handleDateClick(date)
             }
         }
     }
@@ -148,6 +150,120 @@ class HomeFragment : Fragment() {
         return date.after(getTodayAsMidnight())
     }
 
+    private fun handleDateClick(date: CalendarDay) {
+        val selectedJavaDate = Calendar.getInstance().apply {
+            set(date.year, date.month, date.day)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+
+        // 미래 날짜 선택 방지
+        if (isFutureDate(selectedJavaDate)) {
+            Toast.makeText(requireContext(), "미래 날짜는 선택할 수 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            val periodOnSelectedDate = database.periodDao().getPeriodByDate(selectedJavaDate)
+
+            if (periodOnSelectedDate != null) {
+                // 1. 선택된 날짜에 이미 생리 기록이 있는 경우: 삭제 여부 묻기
+                AlertDialog.Builder(requireContext())
+                    .setTitle("기록 삭제")
+                    .setMessage("${dateFormat.format(periodOnSelectedDate.startDate)} ~ ${dateFormat.format(periodOnSelectedDate.endDate)}의 기록을 삭제하시겠습니까?")
+                    .setPositiveButton("삭제") { dialog, which ->
+                        deletePeriodRecord(periodOnSelectedDate)
+                        pendingPeriodStartDate = null // 삭제 후 시작 대기 상태 초기화
+                        removePreviewDecorator()
+                        binding.calendarView.invalidateDecorators()
+                    }
+                    .setNegativeButton("취소") { dialog, which ->
+                        // 이미 시작일이 선택된 상태에서 취소하면, 시작일 선택을 유지
+                        if (pendingPeriodStartDate != null) {
+                            // nothing to do, keep pendingPeriodStartDate
+                        } else {
+                            // 시작일이 없는 상태에서 취소한 경우 (예: 기존 기록 삭제 취소)
+                            pendingPeriodStartDate = null
+                            removePreviewDecorator()
+                            binding.calendarView.invalidateDecorators()
+                        }
+                    }
+                    .show()
+            } else {
+                // 2. 선택된 날짜에 생리 기록이 없는 경우: 시작일/종료일 로직
+                if (pendingPeriodStartDate == null) {
+                    // 2-1. 첫 번째 날짜 선택: 생리 시작일로 설정 (토스트 메시지 없이)
+                    val currentPeriod = database.periodDao().getCurrentPeriod()
+                    if (currentPeriod != null) {
+                        Toast.makeText(requireContext(), "현재 진행 중인 기록이 있습니다. 종료일을 선택하거나 기존 기록을 삭제해주세요.", Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+
+                    pendingPeriodStartDate = selectedJavaDate
+                    Log.d("MainActivity", "Pending period start date set: ${dateFormat.format(selectedJavaDate)}")
+
+                    // 미리보기 데코레이터 업데이트 (선택된 시작일만 표시)
+                    removePreviewDecorator()
+                    previewPeriodDecorator = PreviewPeriodDecorator(listOf(date), requireContext())
+                    binding.calendarView.addDecorator(previewPeriodDecorator)
+
+                } else {
+                    // 2-2. 두 번째 날짜 선택: 생리 종료일로 설정
+                    val periodStartDate = pendingPeriodStartDate!!
+                    val periodEndDate = selectedJavaDate
+
+                    if (periodEndDate.before(periodStartDate)) {
+                        Toast.makeText(requireContext(), "종료일은 시작일보다 이전일 수 없습니다. 다시 선택해주세요.", Toast.LENGTH_LONG).show()
+                        pendingPeriodStartDate = null
+                        removePreviewDecorator()
+                        binding.calendarView.invalidateDecorators()
+                        return@launch
+                    }
+
+                    // 미리보기 데코레이터 업데이트 (시작일과 종료일 범위 표시)
+                    removePreviewDecorator() // 기존 미리보기 제거
+                    val previewDays = getDaysBetween(periodStartDate, periodEndDate)
+                    previewPeriodDecorator = PreviewPeriodDecorator(previewDays.map { CalendarDay.from(it) }, requireContext())
+                    binding.calendarView.addDecorator(previewPeriodDecorator)
+
+
+                    // 생리 기록 저장 전 확인 알림창
+                    AlertDialog.Builder(requireContext())
+                        .setTitle("생리 기록 저장")
+                        .setMessage("${dateFormat.format(periodStartDate)} ~ ${dateFormat.format(periodEndDate)}까지의 기록을 저장하시겠습니까?")
+                        .setPositiveButton("저장") { dialog, which ->
+                            lifecycleScope.launch {
+                                val newPeriod = PeriodRecord(
+                                    startDate = periodStartDate,
+                                    endDate = periodEndDate
+                                )
+                                database.periodDao().insertPeriod(newPeriod)
+                                Toast.makeText(requireContext(), "기간 기록 완료: ${dateFormat.format(periodStartDate)} ~ ${dateFormat.format(periodEndDate)}", Toast.LENGTH_LONG).show()
+
+                                pendingPeriodStartDate = null
+                                removePreviewDecorator()
+
+                                viewModel.calculateAndSaveAverageCycleLength()
+                                binding.calendarView.invalidateDecorators()
+                            }
+                        }
+                        .setNegativeButton("취소") { dialog, which ->
+                            pendingPeriodStartDate = null
+                            removePreviewDecorator()
+                            binding.calendarView.invalidateDecorators()
+                            Toast.makeText(requireContext(), "기록 저장이 취소되었습니다.", Toast.LENGTH_SHORT).show()
+                        }
+                        .show()
+                }
+            }
+            binding.calendarView.invalidateDecorators()
+        }
+    }
+
+    // 두 날짜 사이의 모든 CalendarDay를 반환하는 헬퍼 함수
+
     private fun handleButtonStartPeriod() {
         val selectedJavaDate = Calendar.getInstance().apply {
             set(selectedCalendarDay.year, selectedCalendarDay.month, selectedCalendarDay.day)
@@ -166,13 +282,13 @@ class HomeFragment : Fragment() {
             val periodOnSelectedDate = database.periodDao().getPeriodByDate(selectedJavaDate)
             if (periodOnSelectedDate != null) {
                 AlertDialog.Builder(requireContext())
-                    .setTitle("생리 기록 삭제")
+                    .setTitle("기록 삭제")
                     .setMessage(
                         "${dateFormat.format(periodOnSelectedDate.startDate)} ~ ${
                             dateFormat.format(
                                 periodOnSelectedDate.endDate
                             )
-                        }의 생리 기록을 삭제하시겠습니까?"
+                        }의 기록을 삭제하시겠습니까?"
                     )
                     .setPositiveButton("삭제") { dialog, which ->
                         deletePeriodRecord(periodOnSelectedDate)
@@ -193,7 +309,7 @@ class HomeFragment : Fragment() {
             if (currentPeriod != null) {
                 Toast.makeText(
                     requireContext(),
-                    "현재 진행 중인 생리가 있습니다. 종료일을 선택하거나 기존 기록을 삭제해주세요.",
+                    "현재 진행 중인 기록이 있습니다. 종료일을 선택하거나 기존 기록을 삭제해주세요.",
                     Toast.LENGTH_LONG
                 ).show()
                 return@launch
@@ -202,7 +318,7 @@ class HomeFragment : Fragment() {
             pendingPeriodStartDate = selectedJavaDate
             Toast.makeText(
                 requireContext(),
-                "생리 시작일: ${dateFormat.format(selectedJavaDate)}",
+                "시작일: ${dateFormat.format(selectedJavaDate)}",
                 Toast.LENGTH_SHORT
             ).show()
 
@@ -229,7 +345,7 @@ class HomeFragment : Fragment() {
         }
 
         if (pendingPeriodStartDate == null) {
-            Toast.makeText(requireContext(), "생리 시작일을 먼저 선택해주세요.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "시작일을 먼저 선택해주세요.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -252,7 +368,7 @@ class HomeFragment : Fragment() {
 
         AlertDialog.Builder(requireContext())
             .setTitle("생리 기록 저장")
-            .setMessage("${dateFormat.format(periodStartDate)} ~ ${dateFormat.format(periodEndDate)}까지의 생리 기록을 저장하시겠습니까?")
+            .setMessage("${dateFormat.format(periodStartDate)} ~ ${dateFormat.format(periodEndDate)}까지의 기록을 저장하시겠습니까?")
             .setPositiveButton("저장") { dialog, which ->
                 lifecycleScope.launch {
                     val newPeriod = PeriodRecord(
@@ -262,7 +378,7 @@ class HomeFragment : Fragment() {
                     database.periodDao().insertPeriod(newPeriod)
                     Toast.makeText(
                         requireContext(),
-                        "생리 기간 기록 완료: ${dateFormat.format(periodStartDate)} ~ ${
+                        "기간 기록 완료: ${dateFormat.format(periodStartDate)} ~ ${
                             dateFormat.format(periodEndDate)
                         }",
                         Toast.LENGTH_LONG
@@ -279,7 +395,7 @@ class HomeFragment : Fragment() {
                 pendingPeriodStartDate = null
                 removePreviewDecorator()
                 binding.calendarView.invalidateDecorators()
-                Toast.makeText(requireContext(), "생리 기록 저장이 취소되었습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "기록 저장이 취소되었습니다.", Toast.LENGTH_SHORT).show()
             }
             .show()
     }
@@ -288,7 +404,7 @@ class HomeFragment : Fragment() {
         lifecycleScope.launch {
             try {
                 database.periodDao().deletePeriod(periodRecord)
-                Toast.makeText(requireContext(), "생리 기록이 삭제되었습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "기록이 삭제되었습니다.", Toast.LENGTH_SHORT).show()
                 viewModel.allPeriods.value?.let { updateCalendarDecorators(it) }
                 viewModel.calculateAndSaveAverageCycleLength()
             } catch (e: Exception) {
