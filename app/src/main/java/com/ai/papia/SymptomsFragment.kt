@@ -1,16 +1,19 @@
 package com.ai.papia
 
+import android.app.DatePickerDialog
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.widget.Toast
-import androidx.activity.viewModels
-import androidx.appcompat.app.AppCompatActivity
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.ai.papia.R
 import com.ai.papia.adapters.SymptomsAdapter
 import com.ai.papia.data.Symptom
 import com.ai.papia.data.SymptomType
-import com.ai.papia.databinding.ActivitySymptomsBinding
+import com.ai.papia.databinding.FragmentSymptomsBinding
 import com.ai.papia.room.PeriodTrackerDatabase
 import com.ai.papia.viewModel.MainViewModel
 import com.ai.papia.viewModel.MainViewModelFactory
@@ -18,9 +21,11 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-class SymptomsActivity : AppCompatActivity() {
+class SymptomsFragment : Fragment() {
 
-    private lateinit var binding: ActivitySymptomsBinding
+    private var _binding: FragmentSymptomsBinding? = null
+    private val binding get() = _binding!!
+
     private lateinit var database: PeriodTrackerDatabase
     private lateinit var symptomsAdapter: SymptomsAdapter
     private val viewModel: MainViewModel by viewModels {
@@ -30,38 +35,29 @@ class SymptomsActivity : AppCompatActivity() {
     private val dateFormat = SimpleDateFormat("yyyy년 MM월 dd일", Locale.KOREAN)
     private var selectedDate = Calendar.getInstance().time
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        binding = ActivitySymptomsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        _binding = FragmentSymptomsBinding.inflate(inflater, container, false)
+        database = PeriodTrackerDatabase.getDatabase(requireContext())
+        setupUI()
+        return binding.root
+    }
 
-        database = PeriodTrackerDatabase.getDatabase(this)
-
-        setupToolbar()
+    private fun setupUI() {
         setupRecyclerView()
         setupButtons()
-        setupDatePicker()
+        updateDateDisplay()
         observeData()
-        loadTodaysSymptoms()
     }
-
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            title = "증상 기록"
-        }
-        binding.toolbar.setNavigationOnClickListener {
-            finish()
-        }
-    }
-
     private fun setupRecyclerView() {
         symptomsAdapter = SymptomsAdapter { symptom ->
             deleteSymptom(symptom)
         }
         binding.recyclerViewSymptoms.apply {
-            layoutManager = LinearLayoutManager(this@SymptomsActivity)
+            layoutManager = LinearLayoutManager(requireContext())
             adapter = symptomsAdapter
         }
     }
@@ -76,20 +72,9 @@ class SymptomsActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupDatePicker() {
-        updateDateDisplay()
-    }
-
     private fun observeData() {
-        viewModel.allSymptoms.observe(this) { symptoms ->
-            // 현재 선택된 날짜의 증상만 필터링
-            val todaysSymptoms = symptoms.filter { symptom ->
-                val symptomCalendar = Calendar.getInstance().apply { time = symptom.date }
-                val selectedCalendar = Calendar.getInstance().apply { time = selectedDate }
-
-                symptomCalendar.get(Calendar.YEAR) == selectedCalendar.get(Calendar.YEAR) &&
-                        symptomCalendar.get(Calendar.DAY_OF_YEAR) == selectedCalendar.get(Calendar.DAY_OF_YEAR)
-            }
+        viewModel.allSymptoms.observe(viewLifecycleOwner) { symptoms ->
+            val todaysSymptoms = symptoms.filter { it.sameDay(selectedDate) }
             symptomsAdapter.submitList(todaysSymptoms)
         }
     }
@@ -100,7 +85,7 @@ class SymptomsActivity : AppCompatActivity() {
         val notes = binding.etNotes.text.toString().trim()
 
         if (selectedSymptomType == null) {
-            Toast.makeText(this, "증상을 선택해주세요.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "증상을 선택해주세요.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -112,11 +97,8 @@ class SymptomsActivity : AppCompatActivity() {
         )
 
         viewModel.insertSymptom(symptom)
-
-        // 입력 필드 초기화
         clearInputFields()
-
-        Toast.makeText(this, "증상이 기록되었습니다.", Toast.LENGTH_SHORT).show()
+        Toast.makeText(requireContext(), "증상이 기록되었습니다.", Toast.LENGTH_SHORT).show()
     }
 
     private fun getSelectedSymptomType(): SymptomType? {
@@ -135,29 +117,28 @@ class SymptomsActivity : AppCompatActivity() {
 
     private fun clearInputFields() {
         binding.radioGroupSymptoms.clearCheck()
-        binding.seekBarSeverity.progress = 2 // 기본값 3
+        binding.seekBarSeverity.progress = 2
         binding.etNotes.text.clear()
     }
 
     private fun deleteSymptom(symptom: Symptom) {
         lifecycleScope.launch {
             database.symptomDao().deleteSymptom(symptom)
-            Toast.makeText(this@SymptomsActivity, "증상이 삭제되었습니다.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "증상이 삭제되었습니다.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun showDatePicker() {
         val calendar = Calendar.getInstance().apply { time = selectedDate }
 
-        val datePickerDialog = android.app.DatePickerDialog(
-            this,
+        val datePickerDialog = DatePickerDialog(
+            requireContext(),
             { _, year, month, dayOfMonth ->
                 selectedDate = Calendar.getInstance().apply {
                     set(year, month, dayOfMonth, 0, 0, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.time
                 updateDateDisplay()
-                loadTodaysSymptoms()
             },
             calendar.get(Calendar.YEAR),
             calendar.get(Calendar.MONTH),
@@ -171,7 +152,6 @@ class SymptomsActivity : AppCompatActivity() {
         binding.btnSelectDate.text = dateFormat.format(selectedDate)
         binding.tvSeverityValue.text = "보통 (${binding.seekBarSeverity.progress + 1}/5)"
 
-        // SeekBar 리스너 설정
         binding.seekBarSeverity.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 val severityText = when (progress + 1) {
@@ -190,7 +170,15 @@ class SymptomsActivity : AppCompatActivity() {
         })
     }
 
-    private fun loadTodaysSymptoms() {
-        // Observer가 자동으로 업데이트하므로 별도 작업 불필요
+    private fun Symptom.sameDay(date: Date): Boolean {
+        val cal1 = Calendar.getInstance().apply { time = this@sameDay.date }
+        val cal2 = Calendar.getInstance().apply { time = date }
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
     }
 }

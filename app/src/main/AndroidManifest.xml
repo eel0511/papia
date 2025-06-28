@@ -12,18 +12,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Papia"
         tools:targetApi="31">
-        <activity
-            android:name=".HistoryActivity"
-            android:exported="false" />
-        <activity
-            android:name=".SymptomsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ProfileActivity"
-            android:exported="false" />
-        <activity
-            android:name=".data.SettingActivity"
-            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
