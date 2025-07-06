@@ -41,6 +41,10 @@ class MainActivity : AppCompatActivity() {
                     replaceFragment(HistoryFragment())
                     true
                 }
+                R.id.nav_report -> {
+                    replaceFragment(ReportFragment())
+                    true
+                }
                 else -> false
             }
         })
